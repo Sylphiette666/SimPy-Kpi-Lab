@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--question", help="希望模型回答的问题")
     analyze.add_argument("--model", help="覆盖结果配置中的模型")
     analyze.add_argument("--output", type=Path, help="分析文件输出目录")
+
+    serve = subparsers.add_parser("serve", help="启动人工审批与仿真控制 API")
+    serve.add_argument("--host", default="127.0.0.1", help="监听地址，默认仅本机")
+    serve.add_argument("--port", type=int, default=8000, help="监听端口，默认 8000")
+    serve.add_argument("--reload", action="store_true", help="开发时自动重载")
     return parser
 
 
@@ -62,6 +67,18 @@ def analyze_results(
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "serve":
+            if not 1 <= args.port <= 65535:
+                raise ValueError("--port must be between 1 and 65535")
+            try:
+                from simlab.api import run_api
+            except ImportError as error:
+                raise RuntimeError(
+                    'API dependencies are missing; install with pip install -e ".[api]"'
+                ) from error
+            run_api(host=args.host, port=args.port, reload=args.reload)
+            return
+
         if args.command == "validate":
             config = ProjectConfig.load(args.config)
             scenarios = expand_scenarios(config)
