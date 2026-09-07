@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SimPy 接入 API 实现模型自动生成 — 使用说明</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 11pt;
+    line-height: 1.7;
+    color: #1f2328;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 20pt;
+    color: #0b3d66;
+    border-bottom: 3px solid #0b3d66;
+    padding-bottom: 8px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 15pt;
+    color: #0b3d66;
+    border-left: 5px solid #2f81b7;
+    padding-left: 10px;
+    margin-top: 26px;
+  }
+  h3 {
+    font-size: 12.5pt;
+    color: #16537e;
+    margin-top: 18px;
+  }
+  p { margin: 8px 0; text-align: justify; }
+  code {
+    font-family: Consolas, "Courier New", monospace;
+    background: #f2f5f8;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9.5pt;
+    color: #c7254e;
+  }
+  pre {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f6f8fa;
+    border: 1px solid #d8dee4;
+    border-radius: 6px;
+    padding: 10px 14px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  pre code { background: none; color: #24292f; padding: 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 10pt;
+  }
+  th, td {
+    border: 1px solid #c8d1da;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #e8f0f7; color: #0b3d66; }
+  ul, ol { margin: 8px 0; padding-left: 24px; }
+  li { margin: 4px 0; }
+  .note {
+    background: #fff8e6;
+    border: 1px solid #f0d98c;
+    border-left: 5px solid #e6b422;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 14px 0;
+  }
+  .flow {
+    background: #eef6fb;
+    border: 1px solid #bcd8ec;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 14px 0;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 9.5pt;
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  .meta {
+    color: #6a737d;
+    font-size: 9.5pt;
+    text-align: right;
+    margin-bottom: 20px;
+  }
+  .pagebreak { page-break-before: always; }
+  strong { color: #0b3d66; }
+</style>
+</head>
+<body>
+
+<h1>SimPy 接入 API 实现模型自动生成 — 使用说明</h1>
+<p class="meta">项目目录：F:\Simpy ｜ 生成日期：2026-09-07</p>
+
+<h2>一、项目背景</h2>
+
+<p>项目目录下有两部分内容：</p>
+
+<h3>1. 顶层散落的入门文件（SimPy\SimPy\）</h3>
+<ul>
+  <li><code>SimPy_Test.py</code> — 最基础的 SimPy 汽车延时示例。</li>
+  <li><code>api_test.py</code> — 一个最简单的 FastAPI 示例（只回显参数，未接仿真）。</li>
+  <li><code>sim_api.py</code> — 早期草稿，其中 import 的 <code>config</code> / <code>simulation</code> 模块并不在旁边，真正的实现在 <code>simpy-kpi-lab</code> 包中。</li>
+</ul>
+
+<h3>2. 核心项目 simpy-kpi-lab（版本 0.2.0）</h3>
+<p>位于 <code>SimPy\SimPy\simpy-kpi-lab\simpy-kpi-lab\</code>，虚拟环境已装好（simpy 4.1.2、openai 2.54.0、fastapi、uvicorn，<code>simlab.exe</code> 可直接使用）。整体架构：</p>
+
+<div class="flow">YAML/JSON 配置 → SimPy 排队仿真（replications + 参数网格）→ KPI 统计
+    → ① OpenAI 结构化 KPI 分析（ai.py）
+    → ② OpenAI 白名单动作提案（agent.py）→ 人工审批（workflow.py）→ 新配置版本 → 再仿真（闭环）</div>
+
+<p>各模块职责：</p>
+<table>
+  <tr><th>文件</th><th>职责</th></tr>
+  <tr><td><code>config.py</code></td><td>YAML 严格校验（Pydantic，<code>extra="forbid"</code>）：工位、分布、实验、OpenAI 设置</td></tr>
+  <tr><td><code>simulation.py</code></td><td>SimPy 模型本体（串行多工位排队系统）</td></tr>
+  <tr><td><code>ai.py</code></td><td><code>OpenAIKPIAnalyst</code>：Responses API <code>responses.parse(text_format=KPIAnalysis)</code> 输出结构化 KPI 分析</td></tr>
+  <tr><td><code>agent.py</code></td><td><code>OpenAIProposalAgent</code>：根据当前配置 + KPI 生成待审批的结构化动作提案</td></tr>
+  <tr><td><code>workflow.py</code></td><td>版本化人工审批状态机（pending / approved / rejected / applied / failed + 审计日志 + 幂等）</td></tr>
+  <tr><td><code>service.py</code></td><td>会话编排：提案 → 审批 → 用新配置快照再跑仿真</td></tr>
+  <tr><td><code>api.py</code></td><td>FastAPI REST + WebSocket 控制面</td></tr>
+</table>
+
+<h2>二、关键概念：“模型自动生成”指什么</h2>
+
+<p><strong>AI 不写 SimPy 代码、不执行任何东西</strong>——这是该项目的核心安全设计。所谓“自动生成模型”是指：AI 根据仿真 KPI 结果，自动生成<strong>下一轮模型的结构化参数提案</strong>（如把 <code>stations.1.capacity</code> 从 2 改成 3、启用某资源、改策略），人批准后由<strong>本地代码</strong>应用到新的不可变配置快照上，再跑下一轮仿真，形成闭环。</p>
+
+<p>三类动作是白名单限定的：<code>set_parameter</code>、<code>change_policy</code>、<code>enable_resource</code>，且 <code>requires_approval</code> 恒为 <code>true</code>（必须人工审批）。</p>
+
+<h2>三、怎么使用</h2>
+
+<p>前置条件只有两个：Python 3.11+（已满足）和 <code>OPENAI_API_KEY</code> 环境变量（项目目录下的《SimPy_KPI_Lab_OpenAI_API获取与接入详细教程.docx》是获取 key 的详细教程；key 只从环境变量读取，不写入任何文件）。</p>
+
+<h3>方式一：CLI 一步分析（最简单）</h3>
+<pre><code>cd F:\Simpy\SimPy\SimPy\simpy-kpi-lab\simpy-kpi-lab
+
+# 只设置一次
+$env:OPENAI_API_KEY = "sk-..."
+
+# 1. 校验配置（3 个场景 × 20 次 = 60 次仿真）
+.\.venv\Scripts\simlab.exe validate examples\service_center.yaml
+
+# 2. 跑仿真 + 自动调 OpenAI 分析 KPI
+.\.venv\Scripts\simlab.exe run examples\service_center.yaml --workers 4 --analyze
+
+# 3. 或对已有结果单独分析，可带业务问题
+.\.venv\Scripts\simlab.exe analyze outputs\service_center\results.json `
+  --question "比较各容量方案的服务水平、P95 周期时间和利用率，并指出权衡。"</code></pre>
+
+<p>第 2、3 步会生成 <code>ai_analysis.json</code> 和 <code>ai_analysis.md</code> 两个分析文件。</p>
+
+<h3>方式二：安全闭环控制 API（真正的“AI 自动生成下一轮模型”）</h3>
+<pre><code># 设置 Token 并启动服务（默认只监听本机 8000 端口）
+$env:SIMLAB_API_TOKEN = "随便一个长随机串"
+$env:SIMLAB_API_OUTPUT_ROOT = "outputs/api_sessions"
+.\.venv\Scripts\simlab.exe serve</code></pre>
+
+<p>然后打开 <code>http://127.0.0.1:8000/docs</code>（OpenAPI 交互页面），按顺序调用：</p>
+
+<ol>
+  <li><code>POST /v1/sessions</code> — 用配置 JSON（可用 <code>examples\api_service_center.json</code>）创建会话，记下 <code>workflow_version</code>（每步都要带当前版本号）。</li>
+  <li><code>POST /v1/sessions/{id}/runs</code> — 跑一轮实验。</li>
+  <li><code>GET /v1/sessions/{id}/allowed-actions</code> — 查看当前动作白名单。</li>
+  <li><code>POST /v1/sessions/{id}/proposals:generate</code> — <strong>这一步就是接入 OpenAI</strong>：把最近一次运行的 KPI 汇总 + 当前配置 + 白名单发给模型，模型返回结构化提案计划（可多步动作）。代理会先本地 dry-run 校验每个动作后才入库。</li>
+  <li><code>POST /v1/sessions/{id}/proposals/{pid}:approve</code> 或 <code>:reject</code> — 人工逐条审批；批准后本地代码应用到新配置版本。</li>
+  <li>回到第 2 步用新配置再跑，形成闭环；<code>GET /v1/sessions/{id}/audit</code> 可查全量审计。</li>
+</ol>
+
+<p>PowerShell 端到端演示（人工提案版）：<code>.\examples\human_in_the_loop.ps1</code>。每一步写操作都要求唯一的 <code>operation_id</code> 和当前 <code>expected_version</code>，旧版本会得到 409 冲突而不是覆盖。</p>
+
+<h3>方式三：MCP 接口（给模型用的受限入口）</h3>
+<pre><code>$env:SIMLAB_API_URL = "http://127.0.0.1:8000"
+$env:SIMLAB_API_TOKEN = "与 REST 相同的 Token"
+.\.venv\Scripts\simlab-mcp.exe</code></pre>
+
+<p>只暴露 <code>validate_project</code>、<code>get_session</code>、<code>get_allowed_actions</code>、<code>submit_proposal</code>、<code>list_events</code>，<strong>不暴露</strong>建会话 / 运行 / 批准 / 拒绝——模型无法绕过人工审批。</p>
+
+<h2>四、几点提醒</h2>
+
+<ul>
+  <li><strong>默认模型是 YAML 里的 <code>gpt-5.6</code></strong>（config.py 中 OpenAIConfig.model 的默认值），可用环境变量 <code>SIMLAB_OPENAI_MODEL</code> 或 CLI 的 <code>--model</code> 参数覆盖成账号可用的模型；超时 60s、重试 2 次、<code>store: false</code> 均可在 YAML 的 <code>openai:</code> 段配置。</li>
+  <li>不带 <code>--analyze</code> 的仿真完全不需要 API key；AI 层是可选的，KPI 数值全部由本地代码计算，模型只能解读数据，不会改写实验结果。</li>
+  <li>会话 / 审计存在单进程内存里，服务重启即丢失（生产部署需换 SQLite / PostgreSQL）。</li>
+  <li>想扩展模型：改 <code>simulation.py</code> 里的 <code>customer()</code> 加路由 / 返工 / 优先级；在 <code>config.py</code> 加业务参数；在 KPI 收集器加指标——但不要让 AI 参与 KPI 数值计算。</li>
+</ul>
+
+<div class="note">
+<strong>安全边界小结：</strong>模型收到的只有“当前配置 + KPI 汇总 + 业务目标 + 允许动作目录”，返回后还要经过本地白名单逐字校验、<code>requires_approval=true</code> 检查、完整 Pydantic 配置校验和配置哈希新鲜度检查；模型不能设置 API key、模型名、输出路径、随机 seed 或任意路径，也没有 shell / 文件 / eval / exec 工具。批准动作只影响下一次运行，正在运行的 SimPy replication 不会被热修改，保证 seed、配置与结果可审计复现。
+</div>
+
+</body>
+</html>
